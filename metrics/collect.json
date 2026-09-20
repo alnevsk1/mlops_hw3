@@ -1,35 +1,37 @@
 {
-  "version": "v1",
-  "files": 4,
-  "repos": 4,
-  "commits_listed": 4000,
-  "rows_written": 1514,
+  "version": "v2",
+  "files": 6,
+  "repos": 6,
+  "commits_listed": 6000,
+  "rows_written": 2397,
   "dropped": {
-    "merge": 374,
-    "bot": 863,
-    "revert": 19,
-    "release": 74,
+    "merge": 379,
+    "bot": 1154,
+    "revert": 20,
+    "release": 130,
     "no_prefix": 398,
-    "type_not_wanted": 155,
-    "no_file_details": 53,
+    "type_not_wanted": 336,
+    "no_file_details": 520,
     "duplicate_id": 0,
-    "class_cap": 515,
+    "class_cap": 631,
     "repo_cap": 35
   },
   "breaking_notes_stripped": 1,
-  "breaking_share": 0.0026,
+  "breaking_share": 0.0025,
   "per_class": {
-    "feat": 172,
-    "fix": 516,
-    "docs": 294,
-    "refactor": 203,
-    "test": 139,
-    "chore": 190
+    "feat": 305,
+    "fix": 816,
+    "docs": 481,
+    "refactor": 270,
+    "test": 240,
+    "chore": 285
   },
   "per_repo": {
     "angular/angular": 500,
     "nestjs/nest": 199,
+    "nuxt/nuxt": 396,
     "prisma/orm": 499,
+    "vitejs/vite": 487,
     "vuejs/core": 316
   },
   "per_repo_class": {
@@ -49,6 +51,14 @@
       "test": 28,
       "chore": 27
     },
+    "nuxt/nuxt": {
+      "feat": 61,
+      "fix": 150,
+      "docs": 62,
+      "refactor": 37,
+      "test": 51,
+      "chore": 35
+    },
     "prisma/orm": {
       "feat": 113,
       "fix": 104,
@@ -56,6 +66,14 @@
       "refactor": 44,
       "test": 66,
       "chore": 49
+    },
+    "vitejs/vite": {
+      "feat": 72,
+      "fix": 150,
+      "docs": 125,
+      "refactor": 30,
+      "test": 50,
+      "chore": 60
     },
     "vuejs/core": {
       "feat": 6,
@@ -67,5 +85,5 @@
     }
   },
   "system_prompt_variants": 5,
-  "seconds": 0.4
+  "seconds": 0.43
 }
