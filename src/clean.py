@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from src.config import load_params
-from src.dedup import exact_duplicates
+from src.dedup import exact_duplicates, near_duplicates
 from src.pii import scrub
 from src.schema import Example, dump, iter_examples
 from src.stats import percentile
@@ -66,8 +66,22 @@ def main() -> None:
     exact = set(exact_duplicates(keys))
     kept = [ex for i, ex in enumerate(kept) if i not in exact]
 
-    # 5. TODO: сюда просится ещё один шаг дедупликации.
+    # 5. Near-dup дедупликация: то, что точный хэш не видит по определению —
+    #    та же правка, описанная другими словами, и тот же вопрос с
+    #    переставленными строками. Идёт после точной: дешёвая операция уже
+    #    сняла основную массу, и MinHash работает по остатку.
+    nd = cfg["near_dup"]
     near: set[int] = set()
+    if nd["enabled"]:
+        near = set(
+            near_duplicates(
+                [normalize_text(ex.user) for ex in kept],
+                shingle_words=nd["shingle_words"],
+                num_perm=nd["num_perm"],
+                threshold=nd["threshold"],
+            )
+        )
+        kept = [ex for i, ex in enumerate(kept) if i not in near]
 
     out = Path(paths["clean"])
     out.parent.mkdir(parents=True, exist_ok=True)

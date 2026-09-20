@@ -1,32 +1,42 @@
-"""Стадия collect: источник → data/raw.jsonl.
+"""Стадия collect: кэш коммитов GitHub → data/raw.jsonl.
 
-ЗДЕСЬ студент подменяет сбор на свой. Ниже — чтение parquet курсового датасета
-НМО; у вас на этом месте будет парсер сайта, выгрузка из БД, экспорт из Notion.
+Источник — выгрузка GitHub REST API из репозиториев, соблюдающих Conventional
+Commits (scripts/fetch_github.py кладёт её в sources/*.jsonl). Задача
+классификации: по сообщению коммита без префикса и по списку изменённых файлов
+предсказать тип (`feat` / `fix` / `docs` / `refactor` / `test` / `chore`) и флаг
+breaking change.
+
 Контракт стадии, а не её внутренности, держит остальной пайплайн:
 на выходе JSONL со строками {"id", "topic", "messages": [system, user, assistant]}.
+`topic` — репозиторий: он же ключ группы для сплита (split.group_key), потому
+что у каждого проекта свой стиль сообщений, и коммиты одного репозитория в
+train и test завысили бы метрику.
 
-Скачанный чужой набор сам по себе сдачей не является (README, «Готовый датасет
-как источник»). Поэтому стадия не перекладывает parquet в JSONL один в один,
-а делает три вещи, и каждая видна числом в metrics/collect.json:
+Выгрузка сама по себе сдачей не является: сырой листинг — это сырьё. Стадия
+делает из него датасет, и каждое действие видно числом в metrics/collect.json:
 
-  1. сужает набор до перечисленных тем (collect.topics), если это нужно задаче;
-  2. сверяет ответ с разметкой источника (collect.verify_answer_index) —
-     расхождение выбрасывается, а не переносится в обучение;
-  3. разводит единственную инструкцию источника на варианты
-     (collect.system_prompts), чтобы модель не заучила её формулировку.
+  1. выбрасывает то, что является шаблоном, а не языком: merge, revert,
+     релизные бампы, коммиты ботов (collect.drop_*);
+  2. сверяет заголовок с конвенцией и сужает набор до шести типов
+     (collect.types), остальное выбрасывается, а не переносится в обучение;
+  3. срезает утечку метки во вход: префикс `type(scope)!:` и строку
+     `BREAKING CHANGE:` из тела — иначе задача вырождается в поиск слова;
+  4. балансирует классы внутри репозиториев и репозитории между собой
+     (collect.max_per_class_per_repo, collect.max_per_repo);
+  5. разводит инструкцию на варианты (collect.system_prompts), чтобы модель
+     не заучила единственную формулировку.
 """
+
+from __future__ import annotations
 
 import hashlib
 import json
 import time
+from collections import Counter
 from pathlib import Path
 
-import pyarrow.parquet as pq
-
+from src.commits import body_of, is_bot, is_release, is_revert, parse_header, strip_breaking_note
 from src.config import load_params, source_files
-
-COLUMNS = ["id", "topic", "correct_choice_indices", "messages"]
-BATCH = 2000
 
 
 def pick_prompt(example_id: str, variants: list[str]) -> str:
@@ -39,84 +49,197 @@ def pick_prompt(example_id: str, variants: list[str]) -> str:
     return variants[int(digest, 16) % len(variants)]
 
 
-def answer_matches_source(row: dict) -> bool:
-    """Совпадает ли ответ ассистента с correct_choice_indices источника.
+def clip_body(body: str, limit: int) -> str:
+    """Обрезать тело сообщения по границе строки, чтобы влезть в фильтр длин."""
+    if len(body) <= limit:
+        return body
+    head = body[:limit]
+    cut = head.rfind("\n")
+    return (head[:cut] if cut > limit // 2 else head).rstrip() + " …"
 
-    В sft_single правильный вариант ровно один, а ответ начинается с его
-    номера. Всё, что не так, — либо другой тип задачи, либо битая разметка.
+
+def build_user_text(subject: str, body: str, files: list[dict], max_files: int,
+                    files_total: int | None) -> str:
+    """Вход примера: сообщение без префикса плюс изменённые файлы со статистикой.
+
+    Пути ограничены сверху: коммит, тронувший 300 файлов, иначе забил бы
+    полезный текст перечислением и вылетел бы по фильтру длин.
     """
-    indices = list(row["correct_choice_indices"] or [])
-    if len(indices) != 1:
-        return False
-    return row["messages"][2]["content"].startswith(f"Ответ: {indices[0]}")
+    parts = [subject] if not body else [subject, "", body]
+    shown = files[:max_files]
+    if shown:
+        total = files_total if files_total is not None else len(files)
+        header = (
+            f"Changed files ({total} total, showing {len(shown)}):"
+            if total > len(shown)
+            else f"Changed files ({total}):"
+        )
+        parts += ["", header]
+        parts += [
+            f"- {f['path']} | {f['status']} | +{f['additions']} -{f['deletions']}" for f in shown
+        ]
+    return "\n".join(parts).strip()
 
 
-def main() -> None:
+def read_source(path: Path) -> list[dict]:
+    """Прочитать кэш листинга одного репозитория."""
+    rows: list[dict] = []
+    with path.open(encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, start=1):
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"{path}:{lineno}: кэш источника не разбирается — {exc.msg}")
+    return rows
+
+
+def main() -> None:  # noqa: C901 — счётчики отбора читаются подряд, дробить хуже
     params = load_params()
     cfg = params["collect"]
     paths = params["paths"]
-    n_rows = cfg["n_rows"]
+
     variants = cfg["system_prompts"]
     if not variants:
         raise SystemExit("collect.system_prompts пуст: инструкцию брать неоткуда")
-    topics = cfg["topics"]
-    wanted = set(topics) if topics else None
+    types = list(cfg["types"])
+    wanted = set(types)
 
     out = Path(paths["raw"])
     out.parent.mkdir(parents=True, exist_ok=True)
 
     started = time.perf_counter()
-    scanned = written = dropped_topic = dropped_answer = 0
+    listed = written = 0
+    dropped = Counter()
+    per_class: Counter[str] = Counter()
+    per_repo: Counter[str] = Counter()
+    per_repo_class: Counter[tuple[str, str]] = Counter()
+    breaking_notes = breaking_true = 0
     prompts_used: set[str] = set()
+    seen_ids: set[str] = set()
 
     with out.open("w", encoding="utf-8") as fh:
         for src in source_files(params):
-            if not src.exists():
-                raise SystemExit(f"нет файла-источника: {src}")
-            taken = 0
-            # Фильтры применяются ДО отсечки n_rows: иначе «первые 3000 строк»
-            # и «3000 строк по теме» — разные вещи, и сужение набора давало бы
-            # случайный огрызок вместо заказанного объёма.
-            for batch in pq.ParquetFile(src).iter_batches(batch_size=BATCH, columns=COLUMNS):
-                for row in batch.to_pylist():
-                    if taken >= n_rows:
-                        break
-                    scanned += 1
-                    if wanted is not None and row["topic"] not in wanted:
-                        dropped_topic += 1
-                        continue
-                    if cfg["verify_answer_index"] and not answer_matches_source(row):
-                        dropped_answer += 1
-                        continue
-                    prompt = pick_prompt(row["id"], variants)
-                    prompts_used.add(prompt)
-                    record = {
-                        "id": row["id"],
-                        "topic": row["topic"],
-                        # messages из parquet уже в формате чата; меняется только
-                        # системная реплика — на выбранный вариант инструкции.
-                        "messages": [
-                            {"role": "system", "content": prompt},
-                            *(
-                                {"role": m["role"], "content": m["content"]}
-                                for m in row["messages"][1:]
-                            ),
-                        ],
-                    }
-                    fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-                    taken += 1
-                    written += 1
-                if taken >= n_rows:
+            for row in read_source(src):
+                if written >= cfg["n_rows"]:
                     break
+                listed += 1
+                repo, sha, message = row["repo"], row["sha"], row["message"]
+
+                # 1. Не язык, а шаблон: merge, бот, revert, релизный бамп.
+                header = parse_header(message)
+                if cfg["drop_merges"] and row["parents"] > 1:
+                    dropped["merge"] += 1
+                    continue
+                if cfg["drop_bots"] and is_bot(row["author_login"], row["author_type"]):
+                    dropped["bot"] += 1
+                    continue
+                if cfg["drop_reverts"] and is_revert(message, header):
+                    dropped["revert"] += 1
+                    continue
+                if cfg["drop_release"] and is_release(header, message):
+                    dropped["release"] += 1
+                    continue
+
+                # 2. Конвенция и сужение до шести типов.
+                if header is None:
+                    dropped["no_prefix"] += 1
+                    continue
+                if header.type not in wanted:
+                    dropped["type_not_wanted"] += 1
+                    continue
+
+                # 3. Вход неполон без списка файлов: его нет в листинге,
+                #    и за ним нужен отдельный запрос к API.
+                if not row.get("files"):
+                    dropped["no_file_details"] += 1
+                    continue
+
+                example_id = f"{repo}@{sha[:10]}"
+                if example_id in seen_ids:
+                    dropped["duplicate_id"] += 1
+                    continue
+
+                # 4. Балансировка. Потолок класса считается ВНУТРИ репозитория,
+                #    а не на весь набор: общий потолок выбирался бы в порядке
+                #    файлов, и последнему репозиторию не досталось бы частых
+                #    классов вовсе. А репозиторий — это группа сплита, так что
+                #    перекос уехал бы прямо в test и в macro-F1.
+                if per_repo_class[(repo, header.type)] >= cfg["max_per_class_per_repo"]:
+                    dropped["class_cap"] += 1
+                    continue
+                if per_repo[repo] >= cfg["max_per_repo"]:
+                    dropped["repo_cap"] += 1
+                    continue
+
+                # 5. Утечка метки во вход: префикс уже отрезан разбором
+                #    заголовка, осталась строка BREAKING CHANGE в теле.
+                body, notes = strip_breaking_note(body_of(message))
+                breaking_notes += notes
+                breaking = header.breaking or notes > 0
+
+                user = build_user_text(
+                    header.subject,
+                    clip_body(body, cfg["max_body_chars"]),
+                    row["files"],
+                    cfg["max_files"],
+                    row.get("files_total"),
+                )
+
+                prompt = pick_prompt(example_id, variants)
+                prompts_used.add(prompt)
+                record = {
+                    "id": example_id,
+                    "topic": repo,
+                    "messages": [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user},
+                        {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                {"type": header.type, "breaking": breaking}, ensure_ascii=False
+                            ),
+                        },
+                    ],
+                }
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                seen_ids.add(example_id)
+                per_class[header.type] += 1
+                per_repo[repo] += 1
+                per_repo_class[(repo, header.type)] += 1
+                breaking_true += breaking
+                written += 1
 
     metrics = {
         "version": cfg["version"],
         "files": len(source_files(params)),
-        "rows_scanned": scanned,
+        "repos": len(per_repo),
+        "commits_listed": listed,
         "rows_written": written,
-        "dropped_topic_filter": dropped_topic,
-        "dropped_answer_mismatch": dropped_answer,
-        "topics_filter": len(wanted) if wanted else 0,
+        "dropped": {
+            name: dropped.get(name, 0)
+            for name in (
+                "merge",
+                "bot",
+                "revert",
+                "release",
+                "no_prefix",
+                "type_not_wanted",
+                "no_file_details",
+                "duplicate_id",
+                "class_cap",
+                "repo_cap",
+            )
+        },
+        "breaking_notes_stripped": breaking_notes,
+        "breaking_share": round(breaking_true / written, 4) if written else 0.0,
+        "per_class": {t: per_class.get(t, 0) for t in types},
+        "per_repo": dict(sorted(per_repo.items())),
+        "per_repo_class": {
+            repo: {t: per_repo_class.get((repo, t), 0) for t in types}
+            for repo in sorted(per_repo)
+        },
         "system_prompt_variants": len(prompts_used),
         "seconds": round(time.perf_counter() - started, 2),
     }
@@ -126,8 +249,12 @@ def main() -> None:
 
     print(
         f"collect: версия {cfg['version']}, файлов {metrics['files']}, "
-        f"просмотрено {scanned}, записано {written} "
-        f"(фильтр тем -{dropped_topic}, расхождение с разметкой -{dropped_answer}), "
+        f"просмотрено {listed}, записано {written} "
+        f"(шаблоны -{sum(dropped[k] for k in ('merge', 'bot', 'revert', 'release'))}, "
+        f"вне конвенции -{dropped['no_prefix']}, чужие типы -{dropped['type_not_wanted']}, "
+        f"без списка файлов -{dropped['no_file_details']}, "
+        f"балансировка -{dropped['class_cap'] + dropped['repo_cap']}), "
+        f"BREAKING CHANGE вырезан из {breaking_notes} тел, "
         f"вариантов инструкции {len(prompts_used)}, "
         f"{metrics['seconds']} с → {out}"
     )

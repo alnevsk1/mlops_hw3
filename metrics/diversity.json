@@ -1,0 +1,46 @@
+{
+  "version": "v1",
+  "examples": 1514,
+  "system_prompts": 5,
+  "groups": 4,
+  "largest_group": "angular/angular",
+  "largest_group_share": 0.3303,
+  "answer_len": {
+    "p10": 34,
+    "p50": 35,
+    "p90": 39,
+    "ratio_p90_p10": 1.15,
+    "cv": 0.045,
+    "min": 34,
+    "max": 39
+  },
+  "same_length_share": 0.3976,
+  "duplicate_answer_share": 0.9947,
+  "answer_classes": 8,
+  "largest_answer": "{\"type\": \"fix\", \"breaking\": false}",
+  "largest_answer_share": 0.3408,
+  "user_len": {
+    "p10": 141,
+    "p50": 565,
+    "p90": 1654,
+    "ratio_p90_p10": 11.73,
+    "cv": 0.798,
+    "min": 62,
+    "max": 2525
+  },
+  "thresholds": {
+    "min_examples": 1000,
+    "min_system_prompts": 3,
+    "min_groups": 4,
+    "max_group_share": 0.4,
+    "min_answer_len_ratio": 1.05,
+    "max_same_length_share": 0.5,
+    "max_duplicate_answer_share": 0.999,
+    "min_answer_classes": 6,
+    "max_answer_share": 0.4,
+    "min_user_len_ratio": 2.0
+  },
+  "violations": [],
+  "passed": true,
+  "seconds": 0.3
+}

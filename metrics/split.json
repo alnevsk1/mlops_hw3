@@ -1,0 +1,45 @@
+{
+  "version": "v1",
+  "seed": 42,
+  "group_key": "topic",
+  "groups_total": 4,
+  "sizes": {
+    "train": 999,
+    "val": 199,
+    "test": 316
+  },
+  "groups": {
+    "train": 2,
+    "val": 1,
+    "test": 1
+  },
+  "ratios_actual": {
+    "train": 0.6598,
+    "val": 0.1314,
+    "test": 0.2087
+  },
+  "contamination": {
+    "id_overlap": 0,
+    "text_overlap": 0,
+    "group_overlap": 0,
+    "near_dup_pairs": 0,
+    "examples": {
+      "id": [],
+      "group": [],
+      "near_dup": []
+    }
+  },
+  "groups_by_split": {
+    "train": [
+      "angular/angular",
+      "prisma/orm"
+    ],
+    "val": [
+      "nestjs/nest"
+    ],
+    "test": [
+      "vuejs/core"
+    ]
+  },
+  "seconds": 1.52
+}

@@ -26,15 +26,15 @@ def source_files(params: dict) -> list[Path]:
     files = [Path(p) for p in sources[version]]
     missing = [f for f in files if not f.exists()]
     if missing:
-        # Первое, обо что спотыкается каждый: пакет приходит настроенным на
-        # курсовой датасет, которого у студента нет. Сообщение должно говорить,
-        # что делать, а не печатать FileNotFoundError с чужим абсолютным путём.
+        # Сообщение должно говорить, что делать, а не печатать
+        # FileNotFoundError с чужим абсолютным путём.
         raise SystemExit(
-            "стадия collect не нашла источник:\n  "
+            "стадия collect не нашла кэш источника:\n  "
             + "\n  ".join(str(f) for f in missing)
-            + "\n\nТак и должно быть, если вы ещё не подключили СВОЙ датасет.\n"
-              "Что сделать: переписать src/collect.py под свой источник и\n"
-              "указать пути в params.yaml → collect.sources. Остальные стадии\n"
-              "работают с контрактом raw.jsonl и правок не требуют."
+            + "\n\nКэш собирает scripts/fetch_github.py — он один ходит в сеть.\n"
+              "Что сделать:\n"
+              '  $env:GITHUB_TOKEN = "<personal access token>"\n'
+              "  uv run python scripts/fetch_github.py\n"
+              "Без токена лимит GitHub — 60 запросов в час, полной выгрузки не выйдет."
         )
     return files

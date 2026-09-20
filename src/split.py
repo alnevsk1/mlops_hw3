@@ -6,24 +6,54 @@ import time
 from pathlib import Path
 
 from src.config import load_params
-from src.contamination import report
+from src.contamination import is_clean, report
 from src.schema import Example, dump, iter_examples
 from src.textnorm import normalize_group
 
 
-def row_split(count: int, ratios: dict[str, float], seed: int) -> list[str]:
-    """Раздать строкам метки сплита в заданных долях."""
-    order = list(range(count))
-    random.Random(seed).shuffle(order)
-    labels = [""] * count
-    start = 0
-    names = list(ratios)
-    for i, name in enumerate(names):
-        stop = count if i == len(names) - 1 else start + round(count * ratios[name])
-        for pos in order[start:stop]:
-            labels[pos] = name
-        start = stop
-    return labels
+def group_split(sizes: dict[str, int], ratios: dict[str, float], seed: int) -> dict[str, str]:
+    """Раздать по сплитам ГРУППЫ целиком. Возвращает {группа: имя сплита}.
+
+    Резать по строкам нельзя: у каждого репозитория свой стиль сообщений, и
+    коммиты одного проекта в train и в test — это та же утечка, что и дубли,
+    только незаметная. На лекции случайный сплит дал 19,5% утечки в test.
+
+    Жадно: группы идут от крупных к мелким, каждая уходит в тот сплит, где
+    недобор до целевой доли больше. Точных 80/10/10 при четырёх группах не
+    бывает — фактические доли пишутся в metrics/split.json.
+    """
+    total = sum(sizes.values())
+    if len(sizes) < len(ratios):
+        raise SystemExit(
+            f"групп {len(sizes)}, а сплитов {len(ratios)}: группу нельзя разрезать "
+            f"пополам, не создав утечку. Нужен источник с бо́льшим числом групп."
+        )
+
+    order = sorted(sizes)
+    random.Random(seed).shuffle(order)  # seed решает только ничьи по размеру
+    order.sort(key=lambda g: sizes[g], reverse=True)
+
+    assigned: dict[str, str] = {}
+    filled = {name: 0 for name in ratios}
+    for group in order:
+        name = max(ratios, key=lambda n: total * ratios[n] - filled[n])
+        assigned[group] = name
+        filled[name] += sizes[group]
+
+    # Пустой сплит — не сплит. Отдаём в него самую мелкую группу оттуда,
+    # где групп больше одной: так отклонение от целевых долей минимально.
+    for name in ratios:
+        if filled[name]:
+            continue
+        donor = max(
+            (n for n in ratios if sum(1 for g in assigned.values() if g == n) > 1),
+            key=lambda n: filled[n],
+        )
+        group = min((g for g, n in assigned.items() if n == donor), key=lambda g: sizes[g])
+        assigned[group] = name
+        filled[donor] -= sizes[group]
+        filled[name] += sizes[group]
+    return assigned
 
 
 def main() -> None:
@@ -41,10 +71,10 @@ def main() -> None:
         key = normalize_group(ex.topic)
         sizes[key] = sizes.get(key, 0) + 1
 
-    labels = row_split(len(examples), cfg["ratios"], cfg["seed"])
+    assigned = group_split(sizes, cfg["ratios"], cfg["seed"])
     buckets: dict[str, list[Example]] = {name: [] for name in cfg["ratios"]}
-    for label, ex in zip(labels, examples):
-        buckets[label].append(ex)
+    for ex in examples:
+        buckets[assigned[normalize_group(ex.topic)]].append(ex)
 
     for name, rows in buckets.items():
         out = Path(paths[name])
@@ -75,6 +105,9 @@ def main() -> None:
             name: round(len(rows) / len(examples), 4) for name, rows in buckets.items()
         },
         "contamination": rep,
+        "groups_by_split": {
+            name: sorted(g for g, s in assigned.items() if s == name) for name in buckets
+        },
         "seconds": round(time.perf_counter() - started, 2),
     }
     mpath = Path(paths["metrics_split"])
@@ -86,6 +119,17 @@ def main() -> None:
         + ", ".join(f"{name} {len(rows)}" for name, rows in buckets.items())
         + f" (групп {len(sizes)}, {metrics['seconds']} с)"
     )
+
+    # Контаминация — падение, а не строчка в логе. Утечка не роняет пайплайн
+    # сама по себе: её единственный симптом — метрика, которая приятно удивила.
+    if not is_clean(rep):
+        for key in ("id_overlap", "text_overlap", "group_overlap", "near_dup_pairs"):
+            if rep[key]:
+                print(f"  ✗ {key}: {rep[key]}")
+        raise SystemExit(
+            f"КОНТАМИНАЦИЯ: train и test пересекаются, метрики на test завышены. "
+            f"Подробности в {mpath}."
+        )
 
 
 if __name__ == "__main__":

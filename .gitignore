@@ -2,3 +2,11 @@ __pycache__/
 .venv/
 dvc_remote/
 *.html
+
+# Данные версионируются DVC, а не git: в git едут .dvc-файлы и dvc.lock.
+data/
+sources/
+
+# Следы прогонов tests/check.sh
+*.bak
+*.orig

@@ -1,7 +1,13 @@
-.PHONY: install repro v1 v2 diff dag diversity contamination check clean
+.PHONY: install fetch source-add repro v1 v2 diff dag diversity contamination check clean
 
 install:
 	uv sync
+
+fetch:
+	uv run python scripts/fetch_github.py
+
+source-add:
+	uv run dvc add sources
 
 repro:
 	uv run dvc repro

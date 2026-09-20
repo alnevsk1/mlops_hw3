@@ -1,0 +1,252 @@
+schema: '2.0'
+stages:
+  collect:
+    cmd: python -m src.collect
+    deps:
+    - path: sources
+      hash: md5
+      md5: cdbeeae942f602ef88baf7600cb6cdd7.dir
+      size: 7709138
+      nfiles: 6
+    - path: src/collect.py
+      hash: md5
+      md5: e8db4c04fc88fb9f98b33dcc9a9fde3f
+      size: 12743
+    - path: src/commits.py
+      hash: md5
+      md5: 4263c379b42a2bc5c7c7550656c15239
+      size: 4588
+    - path: src/config.py
+      hash: md5
+      md5: 21a3c6143e6777455d08acd7b576729e
+      size: 1855
+    params:
+      params.yaml:
+        collect:
+          version: v1
+          n_rows: 3000
+          sources:
+            v1:
+            - sources/angular__angular.jsonl
+            - sources/nestjs__nest.jsonl
+            - sources/vuejs__core.jsonl
+            - sources/prisma__orm.jsonl
+            v2:
+            - sources/angular__angular.jsonl
+            - sources/nestjs__nest.jsonl
+            - sources/vuejs__core.jsonl
+            - sources/prisma__orm.jsonl
+            - sources/nuxt__nuxt.jsonl
+            - sources/vitejs__vite.jsonl
+          types:
+          - feat
+          - fix
+          - docs
+          - refactor
+          - test
+          - chore
+          drop_merges: true
+          drop_bots: true
+          drop_reverts: true
+          drop_release: true
+          max_files: 10
+          max_body_chars: 1200
+          max_per_class_per_repo: 150
+          max_per_repo: 500
+          system_prompts:
+          - 'You classify git commits by Conventional Commits type. Given the commit
+            message (prefix removed) and the list of changed files, answer with a
+            JSON object: {"type": one of feat|fix|docs|refactor|test|chore, "breaking":
+            true or false}. Answer with JSON only.'
+          - Определи тип коммита по соглашению Conventional Commits. На входе — 
+            сообщение без префикса и список изменённых файлов. Ответь ровно 
+            одним JSON-объектом с полями type (feat, fix, docs, refactor, test 
+            или chore) и breaking (true или false). Ничего, кроме JSON.
+          - 'Task: commit type classification. You get a commit message with its type
+            prefix stripped, plus changed files with line statistics. Return only
+            JSON: {"type": "...", "breaking": ...}. Allowed types: feat, fix, docs,
+            refactor, test, chore.'
+          - Ты размечаешь историю репозитория. По тексту коммита и списку файлов
+            выбери один тип из feat, fix, docs, refactor, test, chore и укажи, 
+            является ли изменение breaking change. Формат ответа — JSON с 
+            ключами type и breaking, без пояснений.
+          - 'Read the commit message and the changed files, then decide which Conventional
+            Commits type it belongs to and whether it breaks the public API. Reply
+            with a single JSON object {"type": ..., "breaking": ...} and nothing else.'
+        paths.raw: data/raw.jsonl
+    outs:
+    - path: data/raw.jsonl
+      hash: md5
+      md5: 372ebc1d9b6c9a6ac09102ecc201a5fd
+      size: 1937669
+    - path: metrics/collect.json
+      hash: md5
+      md5: 2e901b6875109bdfa2af853546a5d20c
+      size: 1346
+  clean:
+    cmd: python -m src.clean
+    deps:
+    - path: data/raw.jsonl
+      hash: md5
+      md5: 372ebc1d9b6c9a6ac09102ecc201a5fd
+      size: 1937669
+    - path: src/clean.py
+      hash: md5
+      md5: 2a522cf974313492a0bd74520804f846
+      size: 4912
+    - path: src/config.py
+      hash: md5
+      md5: 21a3c6143e6777455d08acd7b576729e
+      size: 1855
+    - path: src/dedup.py
+      hash: md5
+      md5: fde80d28430f1612c4cbb7f0fdcc1f4d
+      size: 2757
+    - path: src/pii.py
+      hash: md5
+      md5: 54de6f3690578d83cfc17094d2d2aa7a
+      size: 2397
+    - path: src/schema.py
+      hash: md5
+      md5: ad834fcb5caa483d3d5d5bfabb433cc0
+      size: 3054
+    - path: src/stats.py
+      hash: md5
+      md5: a54925032eff4769647b5775d72dd423
+      size: 2222
+    - path: src/textnorm.py
+      hash: md5
+      md5: c7e2f072fe9cc4d2b5af76f5c360c6c0
+      size: 1844
+    params:
+      params.yaml:
+        clean:
+          min_user_chars: 30
+          max_user_chars: 4000
+          min_assistant_chars: 2
+          near_dup:
+            enabled: true
+            shingle_words: 4
+            num_perm: 64
+            threshold: 0.85
+          pii:
+            enabled: true
+        paths.clean: data/clean.jsonl
+    outs:
+    - path: data/clean.jsonl
+      hash: md5
+      md5: 2f63d594d673b5fba6a12be2e2e2a634
+      size: 1932512
+    - path: metrics/clean.json
+      hash: md5
+      md5: f13c566b749abc57f6dc78d52b8831c4
+      size: 474
+  diversity:
+    cmd: python -m src.diversity
+    deps:
+    - path: data/clean.jsonl
+      hash: md5
+      md5: 2f63d594d673b5fba6a12be2e2e2a634
+      size: 1932512
+    - path: src/config.py
+      hash: md5
+      md5: 21a3c6143e6777455d08acd7b576729e
+      size: 1855
+    - path: src/diversity.py
+      hash: md5
+      md5: 156f4d20a254cd848b9df8a43ca5081f
+      size: 9137
+    - path: src/schema.py
+      hash: md5
+      md5: ad834fcb5caa483d3d5d5bfabb433cc0
+      size: 3054
+    - path: src/stats.py
+      hash: md5
+      md5: a54925032eff4769647b5775d72dd423
+      size: 2222
+    - path: src/textnorm.py
+      hash: md5
+      md5: c7e2f072fe9cc4d2b5af76f5c360c6c0
+      size: 1844
+    params:
+      params.yaml:
+        diversity:
+          min_examples: 1000
+          min_system_prompts: 3
+          min_groups: 4
+          max_group_share: 0.4
+          min_answer_len_ratio: 1.05
+          max_same_length_share: 0.5
+          max_duplicate_answer_share: 0.999
+          min_answer_classes: 6
+          max_answer_share: 0.4
+          min_user_len_ratio: 2.0
+        paths.clean: data/clean.jsonl
+        split.group_key: topic
+    outs:
+    - path: metrics/diversity.json
+      hash: md5
+      md5: 0b676232f6d6542de17f8eae5bdc73b6
+      size: 1052
+  split:
+    cmd: python -m src.split
+    deps:
+    - path: data/clean.jsonl
+      hash: md5
+      md5: 2f63d594d673b5fba6a12be2e2e2a634
+      size: 1932512
+    - path: src/config.py
+      hash: md5
+      md5: 21a3c6143e6777455d08acd7b576729e
+      size: 1855
+    - path: src/contamination.py
+      hash: md5
+      md5: 9293919fc5964067833313514c6f9f2b
+      size: 2249
+    - path: src/dedup.py
+      hash: md5
+      md5: fde80d28430f1612c4cbb7f0fdcc1f4d
+      size: 2757
+    - path: src/schema.py
+      hash: md5
+      md5: ad834fcb5caa483d3d5d5bfabb433cc0
+      size: 3054
+    - path: src/split.py
+      hash: md5
+      md5: 8550344c9db0d79feb212c9d7f63d427
+      size: 5881
+    - path: src/textnorm.py
+      hash: md5
+      md5: c7e2f072fe9cc4d2b5af76f5c360c6c0
+      size: 1844
+    params:
+      params.yaml:
+        contamination:
+          threshold: 0.85
+        paths.test: data/test.jsonl
+        paths.train: data/train.jsonl
+        paths.val: data/val.jsonl
+        split:
+          group_key: topic
+          ratios:
+            train: 0.8
+            val: 0.1
+            test: 0.1
+          seed: 42
+    outs:
+    - path: data/test.jsonl
+      hash: md5
+      md5: 55308f86c5daab73c4d429533e85e60e
+      size: 239655
+    - path: data/train.jsonl
+      hash: md5
+      md5: e7f36e94d16849017ccc750609f86854
+      size: 1475505
+    - path: data/val.jsonl
+      hash: md5
+      md5: 0412d328564be1d873bfc2425d251d88
+      size: 217352
+    - path: metrics/split.json
+      hash: md5
+      md5: c7cd5df6bf50a3e41365e54d37bffe06
+      size: 733

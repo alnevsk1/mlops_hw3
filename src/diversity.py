@@ -45,6 +45,7 @@ def measure(path: str, group_key: str) -> dict:
 
     top_group, top_group_n = groups.most_common(1)[0]
     _, top_length_n = length_counts.most_common(1)[0]
+    top_answer, top_answer_n = answer_counts.most_common(1)[0]
     duplicate_answers = sum(n - 1 for n in answer_counts.values() if n > 1)
 
     return {
@@ -56,6 +57,14 @@ def measure(path: str, group_key: str) -> dict:
         "answer_len": spread(lengths),
         "same_length_share": round(top_length_n / len(examples), 4),
         "duplicate_answer_share": round(duplicate_answers / len(examples), 4),
+        # Оси для задач с законно однотипным ответом: у меток классов разброс
+        # длин около единицы по определению, и мерить разнообразие по нему
+        # бессмысленно. Мерим его там, где оно должно быть, — в числе классов,
+        # в перекосе классов и в разбросе длин ВХОДА.
+        "answer_classes": len(answer_counts),
+        "largest_answer": top_answer[:60],
+        "largest_answer_share": round(top_answer_n / len(examples), 4),
+        "user_len": spread([len(ex.user) for ex in examples]),
     }
 
 
@@ -101,6 +110,23 @@ def violations(stats: dict, cfg: dict) -> list[str]:
             f"{stats['duplicate_answer_share']:.1%} ответов дословно повторяют друг друга "
             f"(порог {cfg['max_duplicate_answer_share']:.0%})"
         )
+    if stats["answer_classes"] < cfg["min_answer_classes"]:
+        found.append(
+            f"различных ответов {stats['answer_classes']}, нужно ≥ {cfg['min_answer_classes']} — "
+            f"часть классов в наборе не представлена вовсе"
+        )
+    if stats["largest_answer_share"] > cfg["max_answer_share"]:
+        found.append(
+            f"самый частый ответ занимает {stats['largest_answer_share']:.1%} "
+            f"(порог {cfg['max_answer_share']:.0%}): «{stats['largest_answer']}» — "
+            f"на таком перекосе константный классификатор обыграет модель"
+        )
+    user_ratio = stats["user_len"]["ratio_p90_p10"]
+    if user_ratio < cfg["min_user_len_ratio"]:
+        found.append(
+            f"разброс длин входа p90/p10 = {user_ratio}, нужно ≥ {cfg['min_user_len_ratio']} — "
+            f"входы одного размера выдают шаблон так же, как одинаковые ответы"
+        )
     return found
 
 
@@ -126,9 +152,17 @@ def main() -> None:
     mpath.write_text(json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     if failed:
-        # TODO: гейт или отчёт? Стадия, которая сообщает о проблеме и продолжает,
-        # не мешает вырожденному набору доехать до обучения.
-        print("diversity: предупреждение — " + "; ".join(failed))
+        # Гейт, а не отчёт: стадия, которая сообщает о проблеме и продолжает,
+        # не мешает вырожденному набору доехать до обучения. Нарушения печатаются
+        # по одному в строку — разбираться придётся с каждым отдельно.
+        print(f"diversity: набор не прошёл гейт, нарушено порогов: {len(failed)}")
+        for line in failed:
+            print(f"  ✗ {line}")
+        raise DiversityError(
+            f"{paths['clean']}: нарушено порогов разнообразия — {len(failed)}. "
+            f"Пороги правятся в params.yaml → diversity, но только с обоснованием "
+            f"в docs/datasheet.md."
+        )
 
     print(
         f"diversity: {stats['examples']} строк, {stats['system_prompts']} системных промптов, "

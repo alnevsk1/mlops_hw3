@@ -1,0 +1,71 @@
+{
+  "version": "v1",
+  "files": 4,
+  "repos": 4,
+  "commits_listed": 4000,
+  "rows_written": 1514,
+  "dropped": {
+    "merge": 374,
+    "bot": 863,
+    "revert": 19,
+    "release": 74,
+    "no_prefix": 398,
+    "type_not_wanted": 155,
+    "no_file_details": 53,
+    "duplicate_id": 0,
+    "class_cap": 515,
+    "repo_cap": 35
+  },
+  "breaking_notes_stripped": 1,
+  "breaking_share": 0.0026,
+  "per_class": {
+    "feat": 172,
+    "fix": 516,
+    "docs": 294,
+    "refactor": 203,
+    "test": 139,
+    "chore": 190
+  },
+  "per_repo": {
+    "angular/angular": 500,
+    "nestjs/nest": 199,
+    "prisma/orm": 499,
+    "vuejs/core": 316
+  },
+  "per_repo_class": {
+    "angular/angular": {
+      "feat": 39,
+      "fix": 150,
+      "docs": 150,
+      "refactor": 134,
+      "test": 27,
+      "chore": 0
+    },
+    "nestjs/nest": {
+      "feat": 14,
+      "fix": 112,
+      "docs": 9,
+      "refactor": 9,
+      "test": 28,
+      "chore": 27
+    },
+    "prisma/orm": {
+      "feat": 113,
+      "fix": 104,
+      "docs": 123,
+      "refactor": 44,
+      "test": 66,
+      "chore": 49
+    },
+    "vuejs/core": {
+      "feat": 6,
+      "fix": 150,
+      "docs": 12,
+      "refactor": 16,
+      "test": 18,
+      "chore": 114
+    }
+  },
+  "system_prompt_variants": 5,
+  "seconds": 0.4
+}

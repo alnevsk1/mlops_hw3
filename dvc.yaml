@@ -11,20 +11,35 @@ stages:
   collect:
     cmd: python -m src.collect
     deps:
-      # TODO: добавить сюда путь к СВОЕМУ источнику данных.
-      # Без этого dvc не заметит, что источник изменился, и не пересчитает стадию.
+      # Кэш выгрузки GitHub: источник стадии. Без него dvc не заметит, что
+      # данные изменились, и не пересчитает collect.
+      - sources
       - src/collect.py
+      - src/commits.py
       - src/config.py
+    params:
+      # Секция целиком: здесь живёт collect.version, а версия данных обязана
+      # инвалидировать стадию — иначе после смены версии repro говорит,
+      # что пересчитывать нечего, и артефакты остаются от прошлой версии.
+      - collect
+      - paths.raw
     outs:
       - data/raw.jsonl
+    metrics:
+      - metrics/collect.json:
+          cache: false
 
   clean:
     cmd: python -m src.clean
     deps:
+      # Выход collect: без него ребро collect -> clean в графе отсутствует,
+      # и новая версия raw.jsonl не пересчитывает очистку.
+      - data/raw.jsonl
       - src/clean.py
       - src/dedup.py
       - src/pii.py
       - src/schema.py
+      - src/stats.py
       - src/textnorm.py
       - src/config.py
     params:
@@ -70,7 +85,11 @@ stages:
       - paths.val
       - paths.test
     outs:
+      # Все три сплита, а не только train: невыгруженный test — это test,
+      # которого у соседа не будет, и сравнивать метрики будет не с чем.
       - data/train.jsonl
+      - data/val.jsonl
+      - data/test.jsonl
     metrics:
       - metrics/split.json:
           cache: false
